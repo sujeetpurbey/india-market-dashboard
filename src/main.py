@@ -29,11 +29,13 @@ st.markdown("""
     .main {
         padding: 2rem;
     }
-    .metric-card {
+    [data-testid="stMetricDelta"] {
+        font-size: 16px;
+    }
+    .stMetric {
         background-color: #f0f2f6;
-        padding: 1.5rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
+        padding: 15px;
+        border-radius: 8px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -46,7 +48,7 @@ def main():
     
     # Sidebar
     with st.sidebar:
-        st.header("Settings")
+        st.header("⚙️ Settings")
         
         refresh_interval = st.selectbox(
             "Refresh Data Every:",
@@ -63,7 +65,7 @@ def main():
     )
     
     with tab1:
-        st.header("Market Overview")
+        st.header("📈 Market Overview")
         
         try:
             with st.spinner("📥 Fetching latest market data..."):
@@ -75,7 +77,8 @@ def main():
                 rupee_data = fetcher.fetch_rupee_data()
                 
                 if nifty_data is not None and len(nifty_data) > 0:
-                    # Market Metrics
+                    # Market Metrics in proper columns
+                    st.subheader("Key Market Indices")
                     col1, col2, col3, col4 = st.columns(4)
                     
                     # Nifty 50
@@ -84,7 +87,12 @@ def main():
                     nifty_change = ((nifty_current - nifty_prev) / nifty_prev) * 100
                     
                     with col1:
-                        st.metric("Nifty 50", f"₹{nifty_current:,.0f}", f"{nifty_change:+.2f}%")
+                        st.metric(
+                            label="Nifty 50",
+                            value=f"₹{nifty_current:,.0f}",
+                            delta=f"{nifty_change:+.2f}%",
+                            delta_color="normal"
+                        )
                     
                     # Sensex
                     if sensex_data is not None and len(sensex_data) > 0:
@@ -93,7 +101,12 @@ def main():
                         sensex_change = ((sensex_current - sensex_prev) / sensex_prev) * 100
                         
                         with col2:
-                            st.metric("Sensex", f"₹{sensex_current:,.0f}", f"{sensex_change:+.2f}%")
+                            st.metric(
+                                label="Sensex",
+                                value=f"₹{sensex_current:,.0f}",
+                                delta=f"{sensex_change:+.2f}%",
+                                delta_color="normal"
+                            )
                     
                     # USD/INR
                     if rupee_data is not None and len(rupee_data) > 0:
@@ -102,31 +115,53 @@ def main():
                         rupee_change = ((rupee_current - rupee_prev) / rupee_prev) * 100
                         
                         with col3:
-                            st.metric("USD/INR", f"₹{rupee_current:.2f}", f"{rupee_change:+.2f}%")
+                            st.metric(
+                                label="USD/INR",
+                                value=f"₹{rupee_current:.2f}",
+                                delta=f"{rupee_change:+.2f}%",
+                                delta_color="normal"
+                            )
                     
                     with col4:
-                        st.metric("VIX (India)", "Coming Soon", "N/A")
+                        st.metric(
+                            label="VIX (India)",
+                            value="Coming Soon",
+                            delta="N/A"
+                        )
                     
                     st.markdown("---")
                     
                     # Charts
-                    st.subheader("📈 Nifty 50 - Last 1 Year")
-                    fig = create_price_chart(nifty_data, "Nifty 50 Price Chart")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.subheader("📊 Price Charts")
                     
-                    st.subheader("📊 Sensex - Last 1 Year")
-                    if sensex_data is not None and len(sensex_data) > 0:
-                        fig_sensex = create_price_chart(sensex_data, "Sensex Price Chart")
-                        st.plotly_chart(fig_sensex, use_container_width=True)
+                    chart_col1, chart_col2 = st.columns(2)
+                    
+                    with chart_col1:
+                        st.write("**Nifty 50 - Last 1 Year**")
+                        fig = create_price_chart(nifty_data, "Nifty 50")
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    with chart_col2:
+                        st.write("**Sensex - Last 1 Year**")
+                        if sensex_data is not None and len(sensex_data) > 0:
+                            fig_sensex = create_price_chart(sensex_data, "Sensex")
+                            st.plotly_chart(fig_sensex, use_container_width=True)
+                    
+                    # USD/INR Chart
+                    st.write("**USD/INR - Last 1 Year**")
+                    if rupee_data is not None and len(rupee_data) > 0:
+                        fig_rupee = create_price_chart(rupee_data, "USD/INR Exchange Rate")
+                        st.plotly_chart(fig_rupee, use_container_width=True)
+                    
                 else:
-                    st.error("❌ Could not fetch Nifty 50 data. Check your internet connection.")
+                    st.error("❌ Could not fetch market data. Check your internet connection.")
             
         except Exception as e:
-            st.error(f"❌ Error fetching data: {str(e)}")
-            st.info("Make sure you have an internet connection and yfinance is installed.")
+            st.error(f"❌ Error: {str(e)}")
+            st.info("If this persists, try refreshing the page or check your internet connection.")
     
     with tab2:
-        st.header("Economic & Market Indicators")
+        st.header("📊 Technical Indicators")
         
         try:
             with st.spinner("📊 Calculating indicators..."):
@@ -137,7 +172,7 @@ def main():
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.subheader("📊 Technical Indicators")
+                        st.subheader("📈 Nifty 50 Technicals")
                         
                         # Calculate indicators
                         sma50 = Indicators.calculate_sma(nifty_data['Close'], 50).iloc[-1]
@@ -153,23 +188,37 @@ def main():
                         
                         # Signal
                         if sma50 > sma200:
-                            st.success("✅ Golden Cross - Bullish")
+                            st.success("✅ **Golden Cross** - Bullish Trend")
                         else:
-                            st.error("❌ Death Cross - Bearish")
+                            st.error("❌ **Death Cross** - Bearish Trend")
                     
                     with col2:
-                        st.subheader("📈 Market Valuation")
-                        st.write("**Market Metrics (Coming Soon):**")
-                        st.write("- Nifty P/E Ratio")
-                        st.write("- Market Cap to GDP")
-                        st.write("- Dividend Yield")
-                        st.write("- Book Value")
+                        st.subheader("📋 Market Signals")
+                        
+                        st.write("**RSI Interpretation:**")
+                        if rsi > 70:
+                            st.warning(f"⚠️ RSI > 70: OVERBOUGHT (Sell Signal)")
+                        elif rsi < 30:
+                            st.info(f"ℹ️ RSI < 30: OVERSOLD (Buy Signal)")
+                        else:
+                            st.info(f"ℹ️ RSI {rsi:.1f}: NEUTRAL")
+                        
+                        st.write("\n**Price vs Moving Averages:**")
+                        if current_price > sma50:
+                            st.success(f"✅ Price above SMA50")
+                        else:
+                            st.error(f"❌ Price below SMA50")
+                        
+                        if current_price > sma200:
+                            st.success(f"✅ Price above SMA200 (Long-term Bullish)")
+                        else:
+                            st.error(f"❌ Price below SMA200 (Long-term Bearish)")
                         
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
     
     with tab3:
-        st.header("Entry/Exit Signals")
+        st.header("🎯 Trading Signals")
         
         try:
             with st.spinner("🔄 Analyzing market signals..."):
@@ -177,7 +226,7 @@ def main():
                 nifty_data = fetcher.fetch_nifty_data()
                 
                 if nifty_data is not None and len(nifty_data) > 0:
-                    st.subheader("Overall Market Signal")
+                    st.subheader("📊 Overall Market Signal")
                     
                     # Calculate technical indicators
                     sma50 = Indicators.calculate_sma(nifty_data['Close'], 50).iloc[-1]
@@ -203,57 +252,102 @@ def main():
                         signals.append("❌ RSI > 70 (Overbought - Sell Signal)")
                         score -= 1
                     else:
-                        signals.append("🟡 RSI Neutral")
+                        signals.append("🟡 RSI Neutral (30-70 range)")
+                        score += 0
+                    
+                    if current_price > sma50:
+                        signals.append("✅ Price > SMA50 (Short-term Bullish)")
+                        score += 0.5
+                    else:
+                        signals.append("❌ Price < SMA50 (Short-term Bearish)")
+                        score -= 0.5
                     
                     # Display signals
+                    st.write("**Signal Details:**")
                     for signal in signals:
                         st.write(signal)
                     
                     st.markdown("---")
                     
                     # Final recommendation
-                    if score > 0:
-                        st.success(f"🟢 **BULLISH** - Market looks positive (Score: +{score})")
+                    if score > 1:
+                        st.success(f"🟢 **STRONG BUY** - Market looks very positive (Score: +{score:.1f})")
+                    elif score > 0:
+                        st.success(f"🟢 **BULLISH** - Market looks positive (Score: +{score:.1f})")
+                    elif score < -1:
+                        st.error(f"🔴 **STRONG SELL** - Market looks very negative (Score: {score:.1f})")
                     elif score < 0:
-                        st.error(f"🔴 **BEARISH** - Market looks negative (Score: {score})")
+                        st.error(f"🔴 **BEARISH** - Market looks negative (Score: {score:.1f})")
                     else:
-                        st.warning(f"🟡 **NEUTRAL** - Mixed signals (Score: {score})")
+                        st.warning(f"🟡 **NEUTRAL** - Mixed signals (Score: {score:.1f})")
                     
-                    st.info("⚠️ Disclaimer: This is for educational purposes only. Not financial advice.")
+                    st.info("⚠️ **Disclaimer**: This is for educational purposes only. Not financial advice. Always consult a financial advisor.")
                         
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
     
     with tab4:
-        st.header("About This Dashboard")
+        st.header("📖 About This Dashboard")
         st.markdown("""
-        ### India Market Dashboard 🇮🇳📊
+        ### 🇮🇳 India Market Dashboard
         
-        A free, educational tool to track Indian economic health and market valuations.
+        A free, open-source educational tool to track Indian economic health and market valuations.
         
-        **Features:**
-        - 📈 Real-time Nifty 50 & Sensex data
-        - 📊 Technical indicators (SMA, RSI, MACD)
-        - 🎯 Entry/Exit trading signals
-        - 💹 Market metrics and analysis
+        ---
         
-        **Data Sources:**
-        - **Stock Data**: Yahoo Finance (yfinance)
-        - **Nifty 50 & Sensex**: NSE via yfinance
-        - **Economic Data**: RBI, World Bank, Government of India
+        ### ✨ Features
         
-        **Built With:**
-        - Python 🐍
-        - Streamlit
-        - Pandas & NumPy
-        - Plotly Charts
+        - 📈 **Real-time Market Data**: Live Nifty 50, Sensex, and USD/INR prices
+        - 📊 **Technical Analysis**: SMA 50/200, RSI indicators
+        - 🎯 **Trading Signals**: Buy/Sell recommendations based on technical analysis
+        - 📉 **Interactive Charts**: Plotly-powered price charts with trends
+        - 💾 **Smart Caching**: Data cached for 24 hours to avoid API rate limits
+        - 🔄 **Fallback Demo Data**: Works even when live data is unavailable
         
-        **Disclaimer:**
-        ⚠️ This is for **educational purposes only**. 
-        This is **NOT financial advice**. 
-        Always consult a licensed financial advisor before investing.
+        ---
         
-        **GitHub:** [india-market-dashboard](https://github.com/sujeetpurbey/india-market-dashboard)
+        ### 📡 Data Sources
+        
+        - **Stock Market Data**: Yahoo Finance via yfinance library
+        - **Nifty 50 Ticker**: ^NSEI
+        - **Sensex Ticker**: ^BSESN
+        - **USD/INR Ticker**: USDINR=X
+        
+        ---
+        
+        ### 🛠️ Built With
+        
+        - **Python** 🐍
+        - **Streamlit** - Web app framework
+        - **Pandas & NumPy** - Data manipulation
+        - **Plotly** - Interactive charts
+        - **yfinance** - Stock data fetching
+        
+        ---
+        
+        ### ⚠️ Important Disclaimer
+        
+        - ❌ **NOT financial advice**
+        - 📚 **Educational purposes only**
+        - 🎓 **For learning and research**
+        - 💼 **Always consult a licensed financial advisor before investing**
+        
+        ---
+        
+        ### 📂 Technical Details
+        
+        - Data Period: 5 years of historical data
+        - Data Interval: Daily (1D)
+        - Cache Duration: 24 hours
+        - Request Delay: 2 seconds between API calls (to avoid rate limiting)
+        
+        ---
+        
+        ### 🔗 Links
+        
+        - **GitHub**: [india-market-dashboard](https://github.com/sujeetpurbey/india-market-dashboard)
+        - **Creator**: Sujeet Purbey
+        
         """)
 
 if __name__ == "__main__":
