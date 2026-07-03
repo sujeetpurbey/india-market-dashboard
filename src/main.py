@@ -6,13 +6,13 @@ import streamlit as st
 import sys
 import os
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.settings import APP_TITLE, APP_ICON, LAYOUT
-from data_fetcher import DataFetcher
-from visualizations import create_market_metrics, create_signal_gauge
-from signals import SignalAnalyzer
+from src.data_fetcher import DataFetcher
+from src.visualizations import create_market_metrics, create_signal_gauge
+from src.signals import SignalAnalyzer
 
 # Page Configuration
 st.set_page_config(
