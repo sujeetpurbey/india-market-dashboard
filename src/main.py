@@ -23,18 +23,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS for better layout
 st.markdown("""
 <style>
     .main {
-        padding: 2rem;
+        padding: 1rem;
     }
     [data-testid="stMetricDelta"] {
-        font-size: 16px;
+        font-size: 14px;
     }
     .stMetric {
-        background-color: #f0f2f6;
-        padding: 15px;
+        background-color: transparent;
+        padding: 10px;
         border-radius: 8px;
     }
 </style>
@@ -77,62 +77,62 @@ def main():
                 rupee_data = fetcher.fetch_rupee_data()
                 
                 if nifty_data is not None and len(nifty_data) > 0:
-                    # Market Metrics in proper columns
-                    st.subheader("Key Market Indices")
-                    col1, col2, col3, col4 = st.columns(4)
+                    # Market Metrics in proper columns - using flexible layout
+                    st.subheader("📊 Key Market Indices")
+                    
+                    # Create metrics separately to ensure inline display
+                    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns([1, 1, 1, 1], gap="small")
                     
                     # Nifty 50
-                    nifty_current = nifty_data['Close'].iloc[-1]
-                    nifty_prev = nifty_data['Close'].iloc[-2]
+                    nifty_current = float(nifty_data['Close'].iloc[-1])
+                    nifty_prev = float(nifty_data['Close'].iloc[-2])
                     nifty_change = ((nifty_current - nifty_prev) / nifty_prev) * 100
                     
-                    with col1:
+                    with metric_col1:
                         st.metric(
                             label="Nifty 50",
                             value=f"₹{nifty_current:,.0f}",
-                            delta=f"{nifty_change:+.2f}%",
-                            delta_color="normal"
+                            delta=f"{nifty_change:+.2f}%"
                         )
                     
                     # Sensex
                     if sensex_data is not None and len(sensex_data) > 0:
-                        sensex_current = sensex_data['Close'].iloc[-1]
-                        sensex_prev = sensex_data['Close'].iloc[-2]
+                        sensex_current = float(sensex_data['Close'].iloc[-1])
+                        sensex_prev = float(sensex_data['Close'].iloc[-2])
                         sensex_change = ((sensex_current - sensex_prev) / sensex_prev) * 100
                         
-                        with col2:
+                        with metric_col2:
                             st.metric(
                                 label="Sensex",
                                 value=f"₹{sensex_current:,.0f}",
-                                delta=f"{sensex_change:+.2f}%",
-                                delta_color="normal"
+                                delta=f"{sensex_change:+.2f}%"
                             )
                     
                     # USD/INR
                     if rupee_data is not None and len(rupee_data) > 0:
-                        rupee_current = rupee_data['Close'].iloc[-1]
-                        rupee_prev = rupee_data['Close'].iloc[-2]
+                        rupee_current = float(rupee_data['Close'].iloc[-1])
+                        rupee_prev = float(rupee_data['Close'].iloc[-2])
                         rupee_change = ((rupee_current - rupee_prev) / rupee_prev) * 100
                         
-                        with col3:
+                        with metric_col3:
                             st.metric(
                                 label="USD/INR",
                                 value=f"₹{rupee_current:.2f}",
-                                delta=f"{rupee_change:+.2f}%",
-                                delta_color="normal"
+                                delta=f"{rupee_change:+.2f}%"
                             )
                     
-                    with col4:
+                    # VIX
+                    with metric_col4:
                         st.metric(
                             label="VIX (India)",
                             value="Coming Soon",
-                            delta="N/A"
+                            delta="—"
                         )
                     
                     st.markdown("---")
                     
                     # Charts
-                    st.subheader("📊 Price Charts")
+                    st.subheader("📈 Price Charts")
                     
                     chart_col1, chart_col2 = st.columns(2)
                     
@@ -147,10 +147,10 @@ def main():
                             fig_sensex = create_price_chart(sensex_data, "Sensex")
                             st.plotly_chart(fig_sensex, use_container_width=True)
                     
-                    # USD/INR Chart
-                    st.write("**USD/INR - Last 1 Year**")
+                    # USD/INR Chart - Full width
+                    st.write("**USD/INR Exchange Rate - Last 1 Year**")
                     if rupee_data is not None and len(rupee_data) > 0:
-                        fig_rupee = create_price_chart(rupee_data, "USD/INR Exchange Rate")
+                        fig_rupee = create_price_chart(rupee_data, "USD/INR")
                         st.plotly_chart(fig_rupee, use_container_width=True)
                     
                 else:
