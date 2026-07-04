@@ -59,55 +59,65 @@ class DataFetcher:
         }
     
     def _generate_demo_data(self, ticker, base_price=None):
-        """Generate realistic demo data when live data is unavailable"""
-        print(f"Generating demo data for {ticker}...")
+        """Generate realistic baseline data if live API access is completely blocked"""
+        print(f"⚠️ Generating realistic baseline data for {ticker}...")
         end_date = datetime.now()
         start_date = end_date - timedelta(days=365)
-        dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        dates = pd.date_range(start=start_date, end=end_date, freq='B') # Use business days
         
-        if ticker == "^NSEI": base_price = 19500
-        elif ticker == "^BSESN": base_price = 64500
-        elif ticker == "USDINR=X": base_price = 82.5
-        elif ticker == "^INDIAVIX": base_price = 15.0
-        elif ticker == "^NSMIDCAP": base_price = 18000
-        elif ticker == "^NSMALLCAP": base_price = 12000
+        # Updated to accurate realistic market baseline levels
+        if ticker == "^NSEI": base_price = 24300
+        elif ticker == "^BSESN": base_price = 79900
+        elif ticker == "USDINR=X": base_price = 83.5
+        elif ticker == "^INDIAVIX": base_price = 13.5
+        elif ticker == "^NSMIDCAP": base_price = 52000
+        elif ticker == "^NSMALLCAP": base_price = 16000
         elif base_price is None: base_price = 10000
         
-        returns = np.random.normal(0.0005, 0.015, len(dates))
+        # Tightened volatility variance so the demo data doesn't drift away into weird numbers
+        returns = np.random.normal(0.0002, 0.005, len(dates))
         prices = base_price * np.exp(np.cumsum(returns))
         
         df = pd.DataFrame({
-            'Open': prices * (1 + np.random.uniform(-0.01, 0.01, len(prices))),
-            'High': prices * (1 + np.random.uniform(0, 0.02, len(prices))),
-            'Low': prices * (1 + np.random.uniform(-0.02, 0, len(prices))),
+            'Open': prices * (1 + np.random.uniform(-0.003, 0.003, len(prices))),
+            'High': prices * (1 + np.random.uniform(0, 0.006, len(prices))),
+            'Low': prices * (1 + np.random.uniform(-0.006, 0, len(prices))),
             'Close': prices,
-            'Volume': np.random.randint(1000000, 100000000, len(prices))
+            'Volume': np.random.randint(500000, 10000000, len(prices))
         }, index=dates)
         return df
     
     def _fetch_historical_data(self, ticker, name, attr_name):
-        """Generic method to fetch historical data to avoid repeating code"""
+        """Generic method to fetch historical data using robust yf.Ticker architecture"""
         try:
             cached = self._get_from_cache(name)
             if cached is not None:
                 setattr(self, attr_name, cached)
                 return cached
             
-            print(f"📥 Fetching {name} historical data...")
-            data = yf.download(
-                ticker, period=DATA_PERIOD, interval=DATA_INTERVAL,
-                progress=False, auto_adjust=True, timeout=10
-            )
+            print(f"📥 Fetching {name} historical data via Ticker API...")
+            ticker_obj = yf.Ticker(ticker)
             
-            if data is None or len(data) == 0:
-                raise Exception("Empty data received")
+            # Request using configured values
+            data = ticker_obj.history(period=DATA_PERIOD, interval=DATA_INTERVAL, timeout=10)
+            
+            # Safe Fallback: If configured interval/period failed (common mismatch errors)
+            if data is None or data.empty or data['Close'].dropna().empty:
+                print(f"🔄 Settings mismatch for {name}. Falling back to safe standard daily settings...")
+                data = ticker_obj.history(period="1y", interval="1d", timeout=10)
                 
+            if data is None or data.empty or data['Close'].dropna().empty:
+                raise Exception("API returned fully empty historical matrix.")
+                
+            # Safely scrub any trailing weekend empty NaN rows
+            data = data.dropna(subset=['Close'])
+            
             self._set_cache(name, data)
             setattr(self, attr_name, data)
             return data
             
         except Exception as e:
-            print(f"⚠️ Could not fetch {name}: {e}. Using demo data.")
+            print(f"❌ API Failure for {name}: {e}. Activating baseline generator.")
             demo_data = self._generate_demo_data(ticker)
             self._set_cache(name, demo_data)
             setattr(self, attr_name, demo_data)
@@ -121,54 +131,64 @@ class DataFetcher:
     def fetch_smallcap_data(self): return self._fetch_historical_data("^NSMALLCAP", 'smallcap', 'smallcap_data')
     
     def get_latest_price(self, ticker):
-        """Get near real-time price, with a fallback for weekends/after-hours."""
+        """Get near real-time price, handling weekends, holidays, and NaNs safely."""
         try:
             cache_key = f"live_price_{ticker}"
             cached = self._get_from_cache(cache_key, is_live=True)
             if cached is not None:
                 return cached
             
-            # Changed period to "5d" to guarantee we find the last trading day (e.g., Friday)
-            data = yf.download(ticker, period="5d", interval="1m", progress=False, auto_adjust=True, timeout=5)
+            ticker_obj = yf.Ticker(ticker)
             
-            # If 1-minute data fails (yfinance sometimes limits intraday data for indices like VIX), fallback to daily
-            if data is None or len(data) == 0:
-                data = yf.download(ticker, period="5d", progress=False, auto_adjust=True, timeout=5)
+            # Special bypass for India VIX which lacks stable intraday lookups on Yahoo
+            if ticker == "^INDIAVIX":
+                data = ticker_obj.history(period="5d", interval="1d", timeout=5)
+            else:
+                # Try real-time 1-minute intraday blocks first
+                data = ticker_obj.history(period="5d", interval="1m", timeout=5)
+                # Fallback to daily data blocks if intraday is restricted or empty (weekends)
+                if data is None or data.empty or data['Close'].dropna().empty:
+                    data = ticker_obj.history(period="5d", interval="1d", timeout=5)
                 
-            if data is not None and len(data) > 0:
-                price = float(data['Close'].iloc[-1])
-                self._set_cache(cache_key, price, is_live=True)
-                return price
-                
+            if data is not None and not data.empty:
+                # Clear out any empty closing lines generated during non-trading hours
+                valid_data = data.dropna(subset=['Close'])
+                if not valid_data.empty:
+                    price = float(valid_data['Close'].iloc[-1])
+                    self._set_cache(cache_key, price, is_live=True)
+                    return price
+                    
             return None
         except Exception as e:
             print(f"⚠️ Error fetching live price for {ticker}: {e}")
             return None
     
     def get_price_change(self, ticker, period_days=1):
-        """Get percentage change for a ticker, safely bypassing weekends."""
+        """Get percentage change for a ticker, safely bypassing weekends and NaNs."""
         try:
             cache_key = f"live_change_{ticker}_{period_days}d"
             cached = self._get_from_cache(cache_key, is_live=True)
             if cached is not None:
                 return cached
             
-            # Add a 5-day buffer so we have enough trading days to compare against, even over long weekends
-            safe_period = f"{period_days + 5}d"
-            data = yf.download(ticker, period=safe_period, progress=False, auto_adjust=True, timeout=5)
+            ticker_obj = yf.Ticker(ticker)
+            # Fetch an expanded date window to guarantee enough trading days across weekends/holidays
+            safe_period = f"{period_days + 7}d"
+            data = ticker_obj.history(period=safe_period, interval="1d", timeout=5)
             
-            if data is not None and len(data) > period_days:
-                # Compare the absolute last close with the close 'period_days' ago
-                old_price = float(data['Close'].iloc[-(period_days + 1)])
-                new_price = float(data['Close'].iloc[-1])
-                change_pct = ((new_price - old_price) / old_price) * 100
-                
-                self._set_cache(cache_key, change_pct, is_live=True)
-                return change_pct
-                
+            if data is not None and not data.empty:
+                valid_data = data.dropna(subset=['Close'])
+                if len(valid_data) > period_days:
+                    old_price = float(valid_data['Close'].iloc[-(period_days + 1)])
+                    new_price = float(valid_data['Close'].iloc[-1])
+                    change_pct = ((new_price - old_price) / old_price) * 100
+                    
+                    self._set_cache(cache_key, change_pct, is_live=True)
+                    return change_pct
+                    
             return None
         except Exception as e:
-            print(f"⚠️ Error calculating price change: {e}")
+            print(f"⚠️ Error calculating price change for {ticker}: {e}")
             return None
             
     def fetch_all_data(self):
