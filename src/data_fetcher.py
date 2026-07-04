@@ -12,7 +12,6 @@ from config.settings import (
     DATA_PERIOD, DATA_INTERVAL, CACHE_EXPIRY_HOURS
 )
 
-
 class DataFetcher:
     """Fetch market data from yfinance and other sources"""
     
@@ -24,25 +23,37 @@ class DataFetcher:
         self.smallcap_data = None
         self.midcap_data = None
         self.cache = {}
+        self.live_cache = {} # New cache specifically for real-time prices
     
-    def _is_cache_valid(self, key):
-        """Check if cache is still valid"""
-        if key not in self.cache:
-            return False
+    def _is_cache_valid(self, key, is_live=False):
+        """Check if cache is still valid. Live cache expires in 60 seconds."""
+        cache_dict = self.live_cache if is_live else self.cache
         
-        cached_time = self.cache[key]['time']
-        age_hours = (datetime.now() - cached_time).total_seconds() / 3600
-        return age_hours < CACHE_EXPIRY_HOURS
+        if key not in cache_dict:
+            return False
+            
+        cached_time = cache_dict[key]['time']
+        
+        if is_live:
+            # Real-time data expires in 60 seconds
+            age_seconds = (datetime.now() - cached_time).total_seconds()
+            return age_seconds < 60
+        else:
+            # Historical data uses the settings.py expiry
+            age_hours = (datetime.now() - cached_time).total_seconds() / 3600
+            return age_hours < CACHE_EXPIRY_HOURS
     
-    def _get_from_cache(self, key):
+    def _get_from_cache(self, key, is_live=False):
         """Get data from cache"""
-        if self._is_cache_valid(key):
-            return self.cache[key]['data']
+        cache_dict = self.live_cache if is_live else self.cache
+        if self._is_cache_valid(key, is_live):
+            return cache_dict[key]['data']
         return None
     
-    def _set_cache(self, key, data):
+    def _set_cache(self, key, data, is_live=False):
         """Store data in cache"""
-        self.cache[key] = {
+        cache_dict = self.live_cache if is_live else self.cache
+        cache_dict[key] = {
             'data': data,
             'time': datetime.now()
         }
@@ -50,29 +61,18 @@ class DataFetcher:
     def _generate_demo_data(self, ticker, base_price=None):
         """Generate realistic demo data when live data is unavailable"""
         print(f"Generating demo data for {ticker}...")
-        
-        # Create date range
         end_date = datetime.now()
         start_date = end_date - timedelta(days=365)
         dates = pd.date_range(start=start_date, end=end_date, freq='D')
         
-        # Generate realistic price data
-        if ticker == "^NSEI":
-            base_price = 19500
-        elif ticker == "^BSESN":
-            base_price = 64500
-        elif ticker == "USDINR=X":
-            base_price = 82.5
-        elif ticker == "^INDIAVIX":
-            base_price = 15.0
-        elif ticker == "^NSMIDCAP":
-            base_price = 18000
-        elif ticker == "^NSMALLCAP":
-            base_price = 12000
-        elif base_price is None:
-            base_price = 10000
+        if ticker == "^NSEI": base_price = 19500
+        elif ticker == "^BSESN": base_price = 64500
+        elif ticker == "USDINR=X": base_price = 82.5
+        elif ticker == "^INDIAVIX": base_price = 15.0
+        elif ticker == "^NSMIDCAP": base_price = 18000
+        elif ticker == "^NSMALLCAP": base_price = 12000
+        elif base_price is None: base_price = 10000
         
-        # Generate price with random walk
         returns = np.random.normal(0.0005, 0.015, len(dates))
         prices = base_price * np.exp(np.cumsum(returns))
         
@@ -83,302 +83,78 @@ class DataFetcher:
             'Close': prices,
             'Volume': np.random.randint(1000000, 100000000, len(prices))
         }, index=dates)
-        
         return df
     
-    def fetch_nifty_data(self):
-        """Fetch Nifty 50 historical data"""
+    def _fetch_historical_data(self, ticker, name, attr_name):
+        """Generic method to fetch historical data to avoid repeating code"""
         try:
-            # Check cache first
-            cached = self._get_from_cache('nifty')
+            cached = self._get_from_cache(name)
             if cached is not None:
-                print("✅ Using cached Nifty 50 data")
-                self.nifty_data = cached
-                return self.nifty_data
+                setattr(self, attr_name, cached)
+                return cached
             
-            print("📥 Fetching Nifty 50 data from yfinance...")
-            try:
-                self.nifty_data = yf.download(
-                    NIFTY_TICKER,
-                    period=DATA_PERIOD,
-                    interval=DATA_INTERVAL,
-                    progress=False,
-                    auto_adjust=True,
-                    timeout=10
-                )
-                
-                if self.nifty_data is None or len(self.nifty_data) == 0:
-                    raise Exception("Empty data received from yfinance")
-                
-                # Cache it
-                self._set_cache('nifty', self.nifty_data)
-                print("✅ Nifty 50 data fetched successfully")
-                
-            except Exception as e:
-                print(f"⚠️ Could not fetch from yfinance: {e}")
-                print("📊 Using demo data instead...")
-                self.nifty_data = self._generate_demo_data(NIFTY_TICKER)
-                self._set_cache('nifty', self.nifty_data)
+            print(f"📥 Fetching {name} historical data...")
+            data = yf.download(
+                ticker, period=DATA_PERIOD, interval=DATA_INTERVAL,
+                progress=False, auto_adjust=True, timeout=10
+            )
             
-            # Add delay to avoid rate limiting
-            time.sleep(2)
+            if data is None or len(data) == 0:
+                raise Exception("Empty data received")
+                
+            self._set_cache(name, data)
+            setattr(self, attr_name, data)
+            return data
             
-            return self.nifty_data
         except Exception as e:
-            print(f"❌ Error in fetch_nifty_data: {e}")
-            return None
-    
-    def fetch_sensex_data(self):
-        """Fetch Sensex historical data"""
-        try:
-            # Check cache first
-            cached = self._get_from_cache('sensex')
-            if cached is not None:
-                print("✅ Using cached Sensex data")
-                self.sensex_data = cached
-                return self.sensex_data
-            
-            print("📥 Fetching Sensex data from yfinance...")
-            try:
-                self.sensex_data = yf.download(
-                    SENSEX_TICKER,
-                    period=DATA_PERIOD,
-                    interval=DATA_INTERVAL,
-                    progress=False,
-                    auto_adjust=True,
-                    timeout=10
-                )
-                
-                if self.sensex_data is None or len(self.sensex_data) == 0:
-                    raise Exception("Empty data received from yfinance")
-                
-                # Cache it
-                self._set_cache('sensex', self.sensex_data)
-                print("✅ Sensex data fetched successfully")
-                
-            except Exception as e:
-                print(f"⚠️ Could not fetch from yfinance: {e}")
-                print("📊 Using demo data instead...")
-                self.sensex_data = self._generate_demo_data(SENSEX_TICKER)
-                self._set_cache('sensex', self.sensex_data)
-            
-            # Add delay to avoid rate limiting
-            time.sleep(2)
-            
-            return self.sensex_data
-        except Exception as e:
-            print(f"❌ Error in fetch_sensex_data: {e}")
-            return None
-    
-    def fetch_rupee_data(self):
-        """Fetch USD/INR exchange rate data"""
-        try:
-            # Check cache first
-            cached = self._get_from_cache('rupee')
-            if cached is not None:
-                print("✅ Using cached Rupee data")
-                self.rupee_data = cached
-                return self.rupee_data
-            
-            print("📥 Fetching USD/INR data from yfinance...")
-            try:
-                self.rupee_data = yf.download(
-                    RUPEE_TICKER,
-                    period=DATA_PERIOD,
-                    interval=DATA_INTERVAL,
-                    progress=False,
-                    auto_adjust=True,
-                    timeout=10
-                )
-                
-                if self.rupee_data is None or len(self.rupee_data) == 0:
-                    raise Exception("Empty data received from yfinance")
-                
-                # Cache it
-                self._set_cache('rupee', self.rupee_data)
-                print("✅ USD/INR data fetched successfully")
-                
-            except Exception as e:
-                print(f"⚠️ Could not fetch from yfinance: {e}")
-                print("📊 Using demo data instead...")
-                self.rupee_data = self._generate_demo_data(RUPEE_TICKER)
-                self._set_cache('rupee', self.rupee_data)
-            
-            # Add delay to avoid rate limiting
-            time.sleep(2)
-            
-            return self.rupee_data
-        except Exception as e:
-            print(f"❌ Error in fetch_rupee_data: {e}")
-            return None
-    
-    def fetch_vix_data(self):
-        """Fetch India VIX historical data"""
-        try:
-            # Check cache first
-            cached = self._get_from_cache('vix')
-            if cached is not None:
-                print("✅ Using cached VIX data")
-                self.vix_data = cached
-                return self.vix_data
-            
-            print("📥 Fetching India VIX data from yfinance...")
-            try:
-                self.vix_data = yf.download(
-                    "^INDIAVIX",
-                    period=DATA_PERIOD,
-                    interval=DATA_INTERVAL,
-                    progress=False,
-                    auto_adjust=True,
-                    timeout=10
-                )
-                
-                if self.vix_data is None or len(self.vix_data) == 0:
-                    raise Exception("Empty data received from yfinance")
-                
-                # Cache it
-                self._set_cache('vix', self.vix_data)
-                print("✅ VIX data fetched successfully")
-                
-            except Exception as e:
-                print(f"⚠️ Could not fetch from yfinance: {e}")
-                print("📊 Using demo data instead...")
-                self.vix_data = self._generate_demo_data("^INDIAVIX")
-                self._set_cache('vix', self.vix_data)
-            
-            # Add delay to avoid rate limiting
-            time.sleep(2)
-            
-            return self.vix_data
-        except Exception as e:
-            print(f"❌ Error in fetch_vix_data: {e}")
-            return None
-    
-    def fetch_midcap_data(self):
-        """Fetch Midcap 150 historical data"""
-        try:
-            # Check cache first
-            cached = self._get_from_cache('midcap')
-            if cached is not None:
-                print("✅ Using cached Midcap 150 data")
-                self.midcap_data = cached
-                return self.midcap_data
-            
-            print("📥 Fetching Midcap 150 data from yfinance...")
-            try:
-                self.midcap_data = yf.download(
-                    "^NSMIDCAP",
-                    period=DATA_PERIOD,
-                    interval=DATA_INTERVAL,
-                    progress=False,
-                    auto_adjust=True,
-                    timeout=10
-                )
-                
-                if self.midcap_data is None or len(self.midcap_data) == 0:
-                    raise Exception("Empty data received from yfinance")
-                
-                # Cache it
-                self._set_cache('midcap', self.midcap_data)
-                print("✅ Midcap 150 data fetched successfully")
-                
-            except Exception as e:
-                print(f"⚠️ Could not fetch from yfinance: {e}")
-                print("📊 Using demo data instead...")
-                self.midcap_data = self._generate_demo_data("^NSMIDCAP")
-                self._set_cache('midcap', self.midcap_data)
-            
-            # Add delay to avoid rate limiting
-            time.sleep(2)
-            
-            return self.midcap_data
-        except Exception as e:
-            print(f"❌ Error in fetch_midcap_data: {e}")
-            return None
-    
-    def fetch_smallcap_data(self):
-        """Fetch Smallcap 250 historical data"""
-        try:
-            # Check cache first
-            cached = self._get_from_cache('smallcap')
-            if cached is not None:
-                print("✅ Using cached Smallcap 250 data")
-                self.smallcap_data = cached
-                return self.smallcap_data
-            
-            print("📥 Fetching Smallcap 250 data from yfinance...")
-            try:
-                self.smallcap_data = yf.download(
-                    "^NSMALLCAP",
-                    period=DATA_PERIOD,
-                    interval=DATA_INTERVAL,
-                    progress=False,
-                    auto_adjust=True,
-                    timeout=10
-                )
-                
-                if self.smallcap_data is None or len(self.smallcap_data) == 0:
-                    raise Exception("Empty data received from yfinance")
-                
-                # Cache it
-                self._set_cache('smallcap', self.smallcap_data)
-                print("✅ Smallcap 250 data fetched successfully")
-                
-            except Exception as e:
-                print(f"⚠️ Could not fetch from yfinance: {e}")
-                print("📊 Using demo data instead...")
-                self.smallcap_data = self._generate_demo_data("^NSMALLCAP")
-                self._set_cache('smallcap', self.smallcap_data)
-            
-            # Add delay to avoid rate limiting
-            time.sleep(2)
-            
-            return self.smallcap_data
-        except Exception as e:
-            print(f"❌ Error in fetch_smallcap_data: {e}")
-            return None
+            print(f"⚠️ Could not fetch {name}: {e}. Using demo data.")
+            demo_data = self._generate_demo_data(ticker)
+            self._set_cache(name, demo_data)
+            setattr(self, attr_name, demo_data)
+            return demo_data
+
+    def fetch_nifty_data(self): return self._fetch_historical_data(NIFTY_TICKER, 'nifty', 'nifty_data')
+    def fetch_sensex_data(self): return self._fetch_historical_data(SENSEX_TICKER, 'sensex', 'sensex_data')
+    def fetch_rupee_data(self): return self._fetch_historical_data(RUPEE_TICKER, 'rupee', 'rupee_data')
+    def fetch_vix_data(self): return self._fetch_historical_data("^INDIAVIX", 'vix', 'vix_data')
+    def fetch_midcap_data(self): return self._fetch_historical_data("^NSMIDCAP", 'midcap', 'midcap_data')
+    def fetch_smallcap_data(self): return self._fetch_historical_data("^NSMALLCAP", 'smallcap', 'smallcap_data')
     
     def get_latest_price(self, ticker):
-        """Get latest price for a ticker"""
+        """Get near real-time price using 1-minute intervals and a 60-second cache."""
         try:
-            # Check cache first
-            cache_key = f"price_{ticker}"
-            cached = self._get_from_cache(cache_key)
+            cache_key = f"live_price_{ticker}"
+            cached = self._get_from_cache(cache_key, is_live=True)
             if cached is not None:
                 return cached
             
-            data = yf.download(ticker, period="1d", progress=False, auto_adjust=True, timeout=10)
+            # Use interval="1m" to get the absolute latest intraday tick
+            data = yf.download(ticker, period="1d", interval="1m", progress=False, auto_adjust=True, timeout=5)
             if len(data) > 0:
-                price = data['Close'].iloc[-1]
-                self._set_cache(cache_key, price)
-                time.sleep(2)
+                price = float(data['Close'].iloc[-1]) # Ensure it's a clean float
+                self._set_cache(cache_key, price, is_live=True)
                 return price
             return None
         except Exception as e:
-            print(f"⚠️ Error fetching latest price for {ticker}: {e}")
+            print(f"⚠️ Error fetching live price for {ticker}: {e}")
             return None
     
     def get_price_change(self, ticker, period_days=1):
         """Get percentage change for a ticker"""
         try:
-            cache_key = f"change_{ticker}_{period_days}d"
-            cached = self._get_from_cache(cache_key)
+            cache_key = f"live_change_{ticker}_{period_days}d"
+            cached = self._get_from_cache(cache_key, is_live=True)
             if cached is not None:
                 return cached
             
             data = yf.download(
-                ticker,
-                period=f"{period_days+1}d",
-                progress=False,
-                auto_adjust=True,
-                timeout=10
+                ticker, period=f"{period_days+1}d", progress=False, auto_adjust=True, timeout=5
             )
             if len(data) >= 2:
-                old_price = data['Close'].iloc[0]
-                new_price = data['Close'].iloc[-1]
+                old_price = float(data['Close'].iloc[0])
+                new_price = float(data['Close'].iloc[-1])
                 change_pct = ((new_price - old_price) / old_price) * 100
-                self._set_cache(cache_key, change_pct)
-                time.sleep(2)
+                self._set_cache(cache_key, change_pct, is_live=True)
                 return change_pct
             return None
         except Exception as e:
@@ -386,17 +162,12 @@ class DataFetcher:
             return None
     
     def fetch_all_data(self):
-        """Fetch all market data"""
+        """Fetch all market data efficiently"""
         self.fetch_nifty_data()
-        time.sleep(1)
         self.fetch_sensex_data()
-        time.sleep(1)
         self.fetch_rupee_data()
-        time.sleep(1)
         self.fetch_vix_data()
-        time.sleep(1)
         self.fetch_midcap_data()
-        time.sleep(1)
         self.fetch_smallcap_data()
         
         return {
