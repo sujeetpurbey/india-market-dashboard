@@ -119,8 +119,8 @@ class DataFetcher:
     def fetch_vix_data(self): return self._fetch_historical_data("^INDIAVIX", 'vix', 'vix_data')
     def fetch_midcap_data(self): return self._fetch_historical_data("^NSMIDCAP", 'midcap', 'midcap_data')
     def fetch_smallcap_data(self): return self._fetch_historical_data("^NSMALLCAP", 'smallcap', 'smallcap_data')
-  
-def get_latest_price(self, ticker):
+    
+    def get_latest_price(self, ticker):
         """Get near real-time price, with a fallback for weekends/after-hours."""
         try:
             cache_key = f"live_price_{ticker}"
