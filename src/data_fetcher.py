@@ -119,48 +119,58 @@ class DataFetcher:
     def fetch_vix_data(self): return self._fetch_historical_data("^INDIAVIX", 'vix', 'vix_data')
     def fetch_midcap_data(self): return self._fetch_historical_data("^NSMIDCAP", 'midcap', 'midcap_data')
     def fetch_smallcap_data(self): return self._fetch_historical_data("^NSMALLCAP", 'smallcap', 'smallcap_data')
-    
-    def get_latest_price(self, ticker):
-        """Get near real-time price using 1-minute intervals and a 60-second cache."""
+  
+def get_latest_price(self, ticker):
+        """Get near real-time price, with a fallback for weekends/after-hours."""
         try:
             cache_key = f"live_price_{ticker}"
             cached = self._get_from_cache(cache_key, is_live=True)
             if cached is not None:
                 return cached
             
-            # Use interval="1m" to get the absolute latest intraday tick
-            data = yf.download(ticker, period="1d", interval="1m", progress=False, auto_adjust=True, timeout=5)
-            if len(data) > 0:
-                price = float(data['Close'].iloc[-1]) # Ensure it's a clean float
+            # Changed period to "5d" to guarantee we find the last trading day (e.g., Friday)
+            data = yf.download(ticker, period="5d", interval="1m", progress=False, auto_adjust=True, timeout=5)
+            
+            # If 1-minute data fails (yfinance sometimes limits intraday data for indices like VIX), fallback to daily
+            if data is None or len(data) == 0:
+                data = yf.download(ticker, period="5d", progress=False, auto_adjust=True, timeout=5)
+                
+            if data is not None and len(data) > 0:
+                price = float(data['Close'].iloc[-1])
                 self._set_cache(cache_key, price, is_live=True)
                 return price
+                
             return None
         except Exception as e:
             print(f"⚠️ Error fetching live price for {ticker}: {e}")
             return None
     
     def get_price_change(self, ticker, period_days=1):
-        """Get percentage change for a ticker"""
+        """Get percentage change for a ticker, safely bypassing weekends."""
         try:
             cache_key = f"live_change_{ticker}_{period_days}d"
             cached = self._get_from_cache(cache_key, is_live=True)
             if cached is not None:
                 return cached
             
-            data = yf.download(
-                ticker, period=f"{period_days+1}d", progress=False, auto_adjust=True, timeout=5
-            )
-            if len(data) >= 2:
-                old_price = float(data['Close'].iloc[0])
+            # Add a 5-day buffer so we have enough trading days to compare against, even over long weekends
+            safe_period = f"{period_days + 5}d"
+            data = yf.download(ticker, period=safe_period, progress=False, auto_adjust=True, timeout=5)
+            
+            if data is not None and len(data) > period_days:
+                # Compare the absolute last close with the close 'period_days' ago
+                old_price = float(data['Close'].iloc[-(period_days + 1)])
                 new_price = float(data['Close'].iloc[-1])
                 change_pct = ((new_price - old_price) / old_price) * 100
+                
                 self._set_cache(cache_key, change_pct, is_live=True)
                 return change_pct
+                
             return None
         except Exception as e:
             print(f"⚠️ Error calculating price change: {e}")
             return None
-    
+            
     def fetch_all_data(self):
         """Fetch all market data efficiently"""
         self.fetch_nifty_data()
